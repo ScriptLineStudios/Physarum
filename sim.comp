@@ -1,0 +1,104 @@
+#version 460 core
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+struct Agent {
+    vec4 data;
+};
+
+struct Trail {
+    float val;
+};
+
+layout(std430, binding=1) buffer agents_in {
+    Agent agents[];
+} Agents;
+
+layout(std430, binding=2) buffer trails_in {
+    Trail trails[];
+} Trails;
+
+#define PI 3.1415926535897932384626433
+
+uint hash(uint state) {
+    state ^= 2747636419u;
+    state *= 2654435769u;
+    state ^= state >> 16;
+    state *= 2654435769u;
+    state ^= state >> 16;
+    state *= 2654435769u;
+    return state;
+}
+
+float scale_range(uint state) {
+    return state / 4294967295.0;
+}
+
+float random_angle(uint state) {
+	return scale_range(hash(state)) * 2 * PI;
+}
+
+float SO = 28.0;
+vec2 res = vec2(800, 800);
+
+float lookup(Agent agent, float angle) {
+	float lookup_angle = agent.data.z + angle;
+	vec2 dir = vec2(cos(lookup_angle), sin(lookup_angle));
+	vec2 lookup_center = agent.data.xy + dir * SO;
+	float sum = 0;
+
+	for (int x = -1; x <= 1; x++) {
+		for (int y = -1; y <= 1; y++) {
+			ivec2 pos = ivec2(lookup_center + vec2(x, y));
+			sum += Trails.trails[int(pos.y * res.x + pos.x)].val;
+		}
+	}
+
+	return sum;
+}
+
+
+void main() {
+    int x = int(gl_GlobalInvocationID.x);
+
+    Agent agent = Agents.agents[x];
+    ivec2 pos = ivec2(agent.data.xy);
+
+    float angle = agent.data.z;
+    float speed = agent.data.w;
+
+    vec2 velocity = vec2(cos(angle), sin(angle));
+    vec2 new_pos = vec2(agent.data.x + velocity.x * 0.5, agent.data.y + velocity.y * 0.5);
+
+	uint seed = hash(uint(pos.y * res.x + pos.x + hash(x)));
+
+	if (new_pos.x < 0 || new_pos.x >= res.x || new_pos.y < 0 || new_pos.y >= res.y) {
+		Agents.agents[x].data.z = Agents.agents[x].data.z + PI + (scale_range(hash(seed)) * 2) - 1;
+	}
+
+    Trails.trails[int(pos.y * res.x + pos.x)].val = 1;
+
+    //experimental code starts here
+
+	float F = lookup(agent, 0.0);
+	float FL = lookup(agent, 24.0);
+	float FR = lookup(agent, -24.0);
+
+	float SA = scale_range(hash(seed));
+
+	float delta_angle = 0.0;
+	if (F < FL && F < FR) {
+		delta_angle += (SA * 0.5) - 2 * 0.001;  
+	}
+	else if (FL < FR) {
+		delta_angle += SA * 0.001;  
+	}
+	else if (FR < FL) {
+		delta_angle -= SA * 0.001;  
+	}	
+    // experimental code ends here
+
+    Agents.agents[x].data.xy = new_pos;
+    Agents.agents[x].data.z = angle + delta_angle;
+
+}

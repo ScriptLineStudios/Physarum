@@ -1,0 +1,46 @@
+#version 460 core
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+layout(rgba32f, binding = 0) uniform image2D screen;
+
+struct Agent {
+    vec4 data;
+};
+
+layout(std430, binding=1) buffer agents_in {
+    Agent agents[];
+} Agents;
+
+struct Trail {
+    float val;
+};
+
+layout(std430, binding=2) volatile buffer trails_in {
+    Trail agents[];
+} Trails;
+
+vec2 res = vec2(800, 800);
+
+void main() {
+    vec2 coords = vec2(gl_GlobalInvocationID.xy);
+
+    float pixel = Trails.agents[int(coords.y * res.x + coords.x)].val;
+    imageStore(screen, ivec2(coords), vec4(pixel / 4, pixel / 2, pixel, 1.0));    
+    // blur
+    float blurred_sum = 0.0;
+    int num = 0;
+    for (int i = -1; i <= 1; i++) {
+        for (int j = -1; j <= 1; j++) {
+            float pix = Trails.agents[int((coords.y + j) * res.x + (coords.x + i))].val;
+            blurred_sum += pix;
+            num++;
+        }
+    }
+    float blur_res = blurred_sum / num;
+
+    pixel -= 0.0079;
+    pixel = mix(pixel, blur_res, 0.5);
+    // difuse
+    Trails.agents[int(coords.y * res.x + coords.x)].val = pixel;
+
+}
